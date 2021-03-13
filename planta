@@ -1,0 +1,169 @@
+//Librería para lectrua de temperatura
+#include <Adafruit_MAX31865.h>
+int esclavo=8;
+Adafruit_MAX31865 thermo = Adafruit_MAX31865(esclavo, 11, 12, 13);
+#define RREF      430.0
+#define RNOMINAL  100.0
+#include <Wire.h> 
+//Librería para visualizar en pantalla LCD
+#include <LiquidCrystal_I2C.h>
+LiquidCrystal_I2C lcd(0x27,20,4);
+//Declarar variables 
+int vup=3;  //variable del pin de ventiladores 1
+int vdown=2;  //variable del pin de ventiladores 2
+int celup=6;   //variable del pin celda 1
+int celdown=5;  //variable del pin celda 2
+int var=1;  //variable de control de casos
+int cont=0; //Contador para tiempos de prueba
+float x=0;  //variable para guardar el valor de temperatura
+int externa=10; //Variable para esclavo de RTD externa
+int interna=8;  //Variable para esclavo de RTD interna
+
+unsigned long intervalo1 = 15000; //Valor de timepo para el timer (milisegundos)
+unsigned long anterior1 = 0;  //Variable auxiliar para el calculo del tiempo
+unsigned long actual1 = millis(); ////Variable auxiliar para el calculo del tiempo
+
+float I=0; //variable para guardar el valor de corriente
+
+
+void setup() {
+  Serial.println("Adafruit MAX31865 PT100 Sensor Test!");
+  //Declaracion de pines de salida
+  pinMode(vup, OUTPUT); 
+  pinMode(vdown, OUTPUT); 
+  pinMode(celup, OUTPUT); 
+  pinMode(celdown, OUTPUT); 
+  lcd.init();      // inicio del lcd 
+  lcd.backlight();
+  Serial.begin(115200);
+}
+//-----------------------------------------
+//Función para el calculo de la temperatura
+//-----------------------------------------
+void temperatura(){
+  Adafruit_MAX31865 thermo = Adafruit_MAX31865(esclavo, 11, 12, 13);
+  thermo.begin(MAX31865_3WIRE);  // set to 2WIRE or 4WIRE as necessary
+  uint16_t rtd = thermo.readRTD();
+  x=0;
+  float ratio = rtd;
+  ratio /= 32768;
+  x=thermo.temperature(RNOMINAL, RREF);
+  uint8_t fault = thermo.readFault();
+  if (fault) {
+    Serial.print("Fault 0x"); Serial.println(fault, HEX);
+    if (fault & MAX31865_FAULT_HIGHTHRESH) {
+      Serial.println("RTD High Threshold"); 
+    }
+    if (fault & MAX31865_FAULT_LOWTHRESH) {
+      Serial.println("RTD Low Threshold"); 
+    }
+    if (fault & MAX31865_FAULT_REFINLOW) {
+      Serial.println("REFIN- > 0.85 x Bias"); 
+    }
+    if (fault & MAX31865_FAULT_REFINHIGH) {
+      Serial.println("REFIN- < 0.85 x Bias - FORCE- open"); 
+    }
+    if (fault & MAX31865_FAULT_RTDINLOW) {
+      Serial.println("RTDIN- < 0.85 x Bias - FORCE- open"); 
+    }
+    if (fault & MAX31865_FAULT_OVUV) {
+      Serial.println("Under/Over voltage"); 
+    }
+    thermo.clearFault();
+  }  
+}
+
+
+//----------------------------
+//Función calculo del timer
+//----------------------------
+int tiempo1(){
+  actual1=millis();
+  if (actual1 - anterior1 >= intervalo1) {
+    anterior1 = actual1;
+    return 1;
+  }
+  return 0;
+}
+
+//-----------------------------------------
+//Función para ver la temperatura en el LCD
+//-----------------------------------------
+void mostrar(){
+            lcd.clear(); //Limpiar pantalla LCD
+            lcd.setCursor(1,0); //Designación para ubicar el cursor del LCD
+            lcd.print("IN"); //Visualizacion de "IN" en pantalla
+            esclavo=interna;//elección del esclavo a la RTD interna
+            temperatura(); //calculo de temperatura
+            lcd.setCursor(5,0);//Designación para ubicar el cursor del LCD
+            lcd.print("T:");//Visualizacion de "T:" en pantalla
+            lcd.print(x);//Visualizacion del valor de temperatura en pantalla
+            lcd.setCursor(1,1);//Designación para ubicar el cursor del LCD
+            lcd.print("OUT"); //Visualizacion de "OUT" en pantalla
+            esclavo=externa;//elección del esclavo a la RTD externa
+            temperatura();//calculo de temperatura
+            lcd.setCursor(5,1);//Designación para ubicar el cursor del LCD
+            lcd.print("T:");//Visualizacion de "T:" en pantalla
+            lcd.print(x);//Visualizacion del valor de temperatura en pantalla
+}  
+
+//-----------------------------------------------------
+//Función para la adquicición de los datos de la planta
+//-----------------------------------------------------
+void planta(){
+  esclavo=interna;//elección del esclavo a la RTD interna
+  temperatura();//calculo de temperatura
+  Serial.print(x); //guardar el valor de la temperatura en el monitor serial
+  Serial.print(",");
+  I=-((analogRead(A2)*(5.0 / 1023.0))-2.5)/0.1; //lectura y calculo de corriente del sensor
+  Serial.println(I,3); //guardar el valor de la temperatura en el monitor serial
+  cont++;
+  if (cont<1200){ // mantiene el sistema encendido si no han transcurrido las 5 horas
+    analogWrite(celup, 255);
+    analogWrite(celdown, 255);
+    digitalWrite(vup, HIGH);
+    digitalWrite(vdown, HIGH);
+  }
+  if (cont>1200){ // si pasan las 5 horas apaga el sistema
+        digitalWrite(celup, HIGH);
+        digitalWrite(celdown, HIGH);
+        digitalWrite(vup, LOW);
+        digitalWrite(vdown, LOW);
+        var=3;
+  } 
+}
+
+//--------------------------------------
+//             MAIN
+//-------------------------------------
+void loop() {
+  switch (var) { 
+  //
+  case 1:
+        mostrar();  //llamar la funcion de mostrar para visualizar las temperaturas en la pantalla
+        esclavo=interna;//elección del esclavo a la RTD interna
+        temperatura();//calculo de temperatura
+        Serial.print(x); //guardar el valor de la temperatura en el monitor serial
+        Serial.print(",");
+        esclavo=externa;//elección del esclavo a la RTD externa
+        temperatura();//calculo de temperatura
+        Serial.println(x);//guardar el valor de la temperatura en el monitor serial
+        //inicia los actuadores apagados
+        digitalWrite(celup, HIGH);
+        digitalWrite(celdown, HIGH);
+        digitalWrite(vup, LOW);
+        digitalWrite(vdown, LOW);   
+        var=2;
+  break;  //sale del switch
+  //PLANTA
+  case 2:
+        if(tiempo1()>=1){//El tiempo de sensado ya transcurrió
+              mostrar();//llamar la funcion de mostrar para visualizar las temperaturas en la pantalla
+              planta(); //llama a la funcion para realizar la adquisicion de la planta
+            }
+  break;
+  case 3:
+    mostrar();
+  break;
+}
+}
